@@ -1,7 +1,8 @@
-const OpenAI = require('openai');
+const { OpenAI } = require('openai');
 
-const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
+const openai = new OpenAI({
+  apiKey: process.env.GROQ_API_KEY, // تأكد أن الاسم مطابق تماماً لما هو مكتوب في الـ .env
+  baseURL: 'https://api.groq.com/openai/v1', // هذا السطر هو ما يوجه الطلبات لـ Groq
 });
 
-module.exports = client;
+module.exports = openai;
