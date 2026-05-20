@@ -1,17 +1,21 @@
 import React, { useState, useEffect } from 'react';
-
+import CampaignForm from '../components/CampaignForm';
+import FilterBar from '../components/FilterBar';
+import LeadsTable from '../components/LeadsTable';
+import ExecutionLogs from "../components/ExecutionLogs";
 function HomePage() {
-  const [formData, setFormData] = useState({
-    productName: '',
-    tone: 'Energetic'
-  });
-  const [leads, setLeads] = useState([]); // قائمة العملاء المجلوبة من السيرفر
-  const [selectedLeadIds, setSelectedLeadIds] = useState([]); // المعرفات المحددة للإرسال
+  const [formData, setFormData] = useState({ productName: '', tone: 'Energetic' });
+  const [leads, setLeads] = useState([]);
+  const [selectedLeadIds, setSelectedLeadIds] = useState([]);
   const [loading, setLoading] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
-  const [bulkReport, setBulkReport] = useState({}); // حفظ حالة الإرسال لكل عميل بعد العملية
+  const [bulkReport, setBulkReport] = useState({});
+  const [logs, setLogs] = useState([]);
 
-  // 1. جلب قائمة العملاء من السيرفر فور تحميل الصفحة
+  // States الخاصة بالفلترة والبحث المتقدم
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedNiche, setSelectedNiche] = useState('All');
+
   useEffect(() => {
     fetchLeads();
   }, []);
@@ -22,19 +26,36 @@ function HomePage() {
       const data = await response.json();
       if (data.success) {
         setLeads(data.leads);
-        // تحديد جميع العملاء افتراضياً عند البداية
-        setSelectedLeadIds(data.leads.map(l => l.id));
+        setSelectedLeadIds(data.leads.map(l => l.id)); // تحديد الكل في البداية
       }
     } catch (error) {
       setStatusMessage('Failed to load leads from server.');
     }
   };
 
-  const handleChange = (e) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
+  // 1. منطق الفلترة الحي (Live Filtering Logic)
+  const filteredLeads = leads.filter((lead) => {
+    const matchesSearch = lead.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+                          lead.company.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesNiche = selectedNiche === 'All' || lead.niche === selectedNiche;
+    return matchesSearch && matchesNiche;
+  });
+
+  // استخراج قائمة المجالات الفريدة ديناميكياً لبناء الـ Dropdown
+  const niches = [...new Set(leads.map((l) => l.niche))];
+
+  // 2. التحكم بأزرار التحديد والالغاء السريع
+  const handleSelectAllFiltered = () => {
+    const filteredIds = filteredLeads.map(l => l.id);
+    // دمج المحدد مسبقاً مع المحدد حالياً لمنع فقدان البيانات خارج الفلتر
+    setSelectedLeadIds([...new Set([...selectedLeadIds, ...filteredIds])]);
   };
 
-  // 2. إدارة اختيار وإلغاء اختيار العملاء عبر الـ Checkbox
+  const handleDeselectAllFiltered = () => {
+    const filteredIds = filteredLeads.map(l => l.id);
+    setSelectedLeadIds(selectedLeadIds.filter(id => !filteredIds.includes(id)));
+  };
+
   const handleCheckboxChange = (leadId) => {
     if (selectedLeadIds.includes(leadId)) {
       setSelectedLeadIds(selectedLeadIds.filter(id => id !== leadId));
@@ -43,7 +64,7 @@ function HomePage() {
     }
   };
 
-  // 3. إرسال الأتمتة للعملاء المحددين فقط
+  // 3. دالة إطلاق الحملة وقراءة الـ Stream حياً
   const handleBulkAutomation = async () => {
     if (!formData.productName) {
       setStatusMessage('Please enter a product name before running automation.');
@@ -57,7 +78,8 @@ function HomePage() {
     }
 
     setLoading(true);
-    setStatusMessage('');
+    setStatusMessage('Initiating live pipeline stream...');
+    setLogs([]); // تصفية التيرمنال القديم
     setBulkReport({});
 
     try {
@@ -67,25 +89,54 @@ function HomePage() {
         body: JSON.stringify({
           productName: formData.productName,
           tone: formData.tone,
-          selectedLeads: leadsToSend // تمرير القائمة المصفاة فقط
+          selectedLeads: leadsToSend
         }),
       });
 
-      const data = await response.json();
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+      let buffer = '';
 
-      if (data.success) {
-        setStatusMessage(data.message);
-        // تحويل المصفوفة العائدة إلى Object لسهولة مطابقة الحالات في الجدول
-        const reportObj = {};
-        data.report.forEach(item => {
-          reportObj[item.leadId] = item.status;
-        });
-        setBulkReport(reportObj);
-      } else {
-        setStatusMessage('Error: ' + data.error);
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n\n');
+        buffer = lines.pop(); // الاحتفاظ بالسطر غير المكتمل
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const jsonString = line.replace('data: ', '').trim();
+            if (!jsonString) continue;
+
+            const parsed = JSON.parse(jsonString);
+
+            // التحقق من نهاية البث
+            if (parsed.done) {
+              setStatusMessage('Bulk Automation completed successfully!');
+              const reportObj = {};
+              parsed.report.forEach(item => { reportObj[item.leadId] = item.status; });
+              setBulkReport(reportObj);
+            } else {
+              // إضافة السجل الجديد إلى التيرمنال
+              setLogs(prev => [...prev, parsed]);
+
+              // تحديث حالة الجدول بشكل حي أثناء المعالجة!
+              if (parsed.leadId) {
+                setBulkReport(prev => ({
+                  ...prev,
+                  [parsed.leadId]: parsed.status === 'success' ? 'Success' : (parsed.status === 'error' ? 'Failed' : 'Processing...')
+                }));
+              }
+            }
+          }
+        }
       }
+
     } catch (error) {
-      setStatusMessage('Network error. Failed to trigger automation.');
+      setStatusMessage('Network error during streaming pipeline.');
+      console.error(error);
     } finally {
       setLoading(false);
     }
@@ -94,112 +145,55 @@ function HomePage() {
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col items-center py-10 px-4">
       <header className="mb-10 text-center">
-        <h1 className="text-3xl font-bold text-slate-100 mb-2">
-          Marketing Automation Dashboard
-        </h1>
-        <p className="text-slate-400">Advanced lead management and contextual bulk deployment.</p>
+        <h1 className="text-3xl font-bold text-slate-100 mb-2">Marketing Automation Dashboard</h1>
+        <p className="text-slate-400">Structured Dashboard Component-Driven Architecture.</p>
       </header>
 
       <main className="w-full max-w-5xl grid grid-cols-1 md:grid-cols-2 gap-8">
-        {/* Form Inputs & Settings */}
-        <section className="bg-slate-800 p-6 rounded-xl border border-slate-700 h-fit space-y-4">
-          <h2 className="text-lg font-semibold text-slate-200">Campaign Global Configurations</h2>
-          
-          <div>
-            <label className="block text-sm font-medium mb-1 text-slate-400">Product Name</label>
-            <input
-              type="text"
-              name="productName"
-              value={formData.productName}
-              onChange={handleChange}
-              placeholder="e.g., Luxury Custom T-Shirts"
-              className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2 text-slate-200 focus:outline-none focus:border-blue-500"
+        <CampaignForm 
+          formData={formData} 
+          setFormData={setFormData} 
+          onLaunch={handleBulkAutomation} 
+          selectedCount={selectedLeadIds.filter(id => leads.map(l => l.id).includes(id)).length}
+          loading={loading}
+        />
+
+        <section className="flex flex-col min-h-[450px]">
+          {/* شريط الفلترة المتقدمة */}
+          <FilterBar 
+            searchTerm={searchTerm}
+            setSearchTerm={setSearchTerm}
+            selectedNiche={selectedNiche}
+            setSelectedNiche={setSelectedNiche}
+            niches={niches}
+            onSelectAll={handleSelectAllFiltered}
+            onDeselectAll={handleDeselectAllFiltered}
+          />
+
+          {/* لوحة إدارة وحالة العملاء الحية */}
+          <div className="bg-slate-800 p-6 rounded-xl border border-slate-700 flex flex-col flex-1">
+            <h2 className="text-lg font-semibold mb-4 text-slate-200">Lead Management UI</h2>
+            
+            {statusMessage && (
+              <div className={`p-3 rounded-lg mb-4 text-sm font-medium ${
+                statusMessage.toLowerCase().includes('success') || statusMessage.includes('completed')
+                  ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' 
+                  : 'bg-rose-950 text-rose-400 border border-rose-800'
+              }`}>
+                {statusMessage}
+              </div>
+            )}
+
+            <LeadsTable 
+              leads={filteredLeads}
+              selectedLeadIds={selectedLeadIds}
+              onCheckboxChange={handleCheckboxChange}
+              bulkReport={bulkReport}
             />
-          </div>
 
-          <div>
-            <label className="block text-sm font-medium mb-1 text-slate-400">Tone</label>
-            <select
-              name="tone"
-              value={formData.tone}
-              onChange={handleChange}
-              className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2 text-slate-200 focus:outline-none focus:border-blue-500"
-            >
-              <option value="Energetic">Energetic</option>
-              <option value="Professional">Professional</option>
-              <option value="Creative">Creative</option>
-            </select>
-          </div>
-
-          <button
-            type="button"
-            onClick={handleBulkAutomation}
-            disabled={loading}
-            className={`w-full font-medium py-2.5 px-4 rounded-lg transition duration-200 mt-2 ${
-              loading 
-                ? 'bg-slate-700 text-slate-400 cursor-not-allowed' 
-                : 'bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-900/20'
-            }`}
-          >
-            {loading ? 'Processing Contextual Queue...' : `Launch Campaign on (${selectedLeadIds.length}) Leads ⚙️`}
-          </button>
-        </section>
-
-        {/* Interactive Lead Management UI */}
-        <section className="bg-slate-800 p-6 rounded-xl border border-slate-700 flex flex-col min-h-[400px]">
-          <h2 className="text-lg font-semibold mb-4 text-slate-200">Lead Management UI</h2>
-          
-          {statusMessage && (
-            <div className={`p-3 rounded-lg mb-4 text-sm font-medium ${
-              statusMessage.toLowerCase().includes('success') || statusMessage.includes('completed')
-                ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' 
-                : 'bg-rose-950 text-rose-400 border border-rose-800'
-            }`}>
-              {statusMessage}
-            </div>
-          )}
-
-          <div className="flex-1 bg-slate-900 rounded-lg p-2 border border-slate-700 overflow-x-auto">
-            <table className="w-full text-left text-sm border-collapse">
-              <thead>
-                <tr className="border-b border-slate-700 text-slate-400">
-                  <th className="p-3 w-10 text-center">Select</th>
-                  <th className="p-3">Lead Info</th>
-                  <th className="p-3 text-right">Deployment Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {leads.map((lead) => (
-                  <tr key={lead.id} className="border-b border-slate-800 last:border-0 hover:bg-slate-800/40 transition">
-                    <td className="p-3 text-center">
-                      <input
-                        type="checkbox"
-                        checked={selectedLeadIds.includes(lead.id)}
-                        onChange={() => handleCheckboxChange(lead.id)}
-                        className="w-4 h-4 bg-slate-900 border-slate-700 rounded text-blue-600 focus:ring-blue-500 focus:ring-offset-slate-900"
-                      />
-                    </td>
-                    <td className="p-3">
-                      <div className="font-medium text-slate-200">{lead.name}</div>
-                      <div className="text-xs text-slate-400">{lead.company} • <span className="text-slate-500">{lead.niche}</span></div>
-                    </td>
-                    <td className="p-3 text-right">
-                      {bulkReport[lead.id] ? (
-                        <span className={`px-2 py-0.5 rounded text-xs font-semibold ${
-                          bulkReport[lead.id] === 'Success' 
-                            ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' 
-                            : 'bg-rose-950 text-rose-400 border border-rose-800'
-                        }`}>
-                          {bulkReport[lead.id]}
-                        </span>
-                      ) : (
-                        <span className="text-xs text-slate-600 italic">Idle</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            {/* شاشة السجلات الحية ممررة بشكل صحيح وذاتية الإغلاق */}
+            <ExecutionLogs logs={logs} onClear={() => setLogs([])} />
+            
           </div>
         </section>
       </main>

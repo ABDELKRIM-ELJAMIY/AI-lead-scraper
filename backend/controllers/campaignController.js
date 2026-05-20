@@ -2,13 +2,13 @@ const openai = require('../config/openai');
 const mockLeads = require('../data/mockData');
 const { sendCampaignEmail } = require('../services/emailService');
 
-// 1. دالة التوليد الفردي (Single Test)
+// 1. توليد نص لحملة فردية (النظام القديم المستقر)
 const generateCampaignText = async (req, res) => {
   try {
     const { productName, targetAudience, tone, recipientEmail } = req.body;
 
     if (!productName || !targetAudience) {
-      return res.status(400).json({ error: 'الرجاء إدخال اسم المنتج والفئة المستهدفة.' });
+      return res.status(400).json({ error: 'Please provide product name and target audience.' });
     }
 
     const prompt = `صمم محتوى حملة تسويقية احترافية وجذابة للمنتج التالي: "${productName}".
@@ -16,7 +16,6 @@ const generateCampaignText = async (req, res) => {
 نبرة الصوت (Tone): "${tone || 'احترافية ومقنعة'}".
 المطلوب: عنوان جذاب، يليه نص بريد إلكتروني تسويقي قصير ومباشر ينتهي بعبارة تحفيزية لاتخاذ إجراء (Call to Action).`;
 
-    // تحديث الموديل هنا إلى llama-3.1-8b-instant
     const response = await openai.chat.completions.create({
       model: 'llama-3.1-8b-instant', 
       messages: [
@@ -30,14 +29,14 @@ const generateCampaignText = async (req, res) => {
     const generatedContent = response.choices[0].message.content;
     const htmlFormattedContent = generatedContent.replace(/\n/g, '<br>');
 
-    let emailStatus = "لم يتم تحديد إيميل للإرسال";
+    let emailStatus = "No email provided for sending";
     if (recipientEmail) {
       await sendCampaignEmail(
         recipientEmail, 
-        `حملة تسويقية جديدة: ${productName}`, 
+        `Campaign: ${productName}`, 
         htmlFormattedContent
       );
-      emailStatus = `تم الإرسال بنجاح إلى ${recipientEmail}`;
+      emailStatus = `Sent successfully to ${recipientEmail}`;
     }
 
     res.status(200).json({
@@ -47,30 +46,53 @@ const generateCampaignText = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('خطأ في السيرفر:', error.message);
-    res.status(500).json({ success: false, error: 'حدث خطأ أثناء معالجة الطلب.' });
+    console.error('Server error:', error.message);
+    res.status(500).json({ success: false, error: 'An error occurred while processing the request.' });
   }
 };
 
-// 2. دالة الأتمتة الجماعية (Bulk Automation)
-// دالة الأتمتة الجماعية المحدثة بالكامل لحقن البيانات الشخصية ومنع النصوص الزائدة
-const triggerBulkAutomation = async (req, res) => {
-  const { productName, tone, selectedLeads } = req.body; // استقبال القائمة المحددة هنا
+// 2. دالة الـ Bulk Automation المطورة والمدعومة بالبث الحي الحقيقي (SSE + AI + Real Email)
+const triggerBulkAutomationSSE = async (req, res) => {
+  const { productName, tone, selectedLeads } = req.body;
 
+  // إعدادات الـ Headers الصارمة للبث الفوري المتوافق مع CORS ومنع الـ Buffering
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache, no-transform',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no'
+  });
+
+  // دالة إرسال السجلات للـ Frontend وضخها فوراً
+  const sendLog = (message, status = 'info', leadId = null) => {
+    const data = JSON.stringify({ timestamp: new Date().toLocaleTimeString(), message, status, leadId });
+    res.write(`data: ${data}\n\n`);
+    if (res.flush) res.flush();
+    else if (res.flushHeaders) res.flushHeaders();
+  };
+
+  // التحقق الفوري من البيانات قبل بدء المعالجة
   if (!productName || !tone) {
-    return res.status(400).json({ success: false, error: 'الرجاء إدخال اسم المنتج ونبرة الصوت.' });
+    sendLog('❌ Configuration error: Missing product name or tone selection.', 'error');
+    res.end();
+    return;
   }
 
   if (!selectedLeads || selectedLeads.length === 0) {
-    return res.status(400).json({ success: false, error: 'الرجاء تحديد عميل واحد على الأقل للإرسال.' });
+    sendLog('❌ Targeting error: No leads were selected for this run.', 'error');
+    res.end();
+    return;
   }
 
-  const resultsReport = [];
+  sendLog('⚡ Engine Initiated: Starting Advanced Contextual Campaign Pipeline...', 'info');
+  const report = [];
 
   try {
-    // الدوران فقط على العملاء الذين تم تحديدهم وإرسالهم من الواجهة
     for (const lead of selectedLeads) {
       try {
+        // تحديث واجهة المستخدم فوراً لحالة المعالجة الحالية للعميل
+        sendLog(`🔄 Fetching context & generating cold email copy for: ${lead.name} (${lead.company})`, 'processing', lead.id);
+
         const personalizedPrompt = `
           Write a cold outreach email offering a product/service named "${productName}".
           
@@ -90,6 +112,7 @@ const triggerBulkAutomation = async (req, res) => {
           - Make it sound organic, human-written, and professional.
         `;
 
+        // استدعاء الـ AI الفعلي لكل عميل سياقياً
         const response = await openai.chat.completions.create({
           model: 'llama-3.1-8b-instant',
           messages: [
@@ -107,38 +130,32 @@ const triggerBulkAutomation = async (req, res) => {
         const htmlFormattedContent = generatedText.replace(/\n/g, '<br>');
         const emailSubject = `Tailored Solution for ${lead.company}`;
 
+        // إرسال البريد الإلكتروني الفعلي للعميل
+        sendLog(`✉️ Copy generated. Dispatching real email node to ${lead.email}...`, 'processing', lead.id);
         await sendCampaignEmail(lead.email, emailSubject, htmlFormattedContent);
 
-        resultsReport.push({
-          leadId: lead.id,
-          name: lead.name,
-          company: lead.company,
-          status: 'Success'
-        });
+        // إرسال حالة النجاح الفورية للعميل في الواجهة والتيرمنال
+        sendLog(`✅ Successfully contextualized & dispatched to ${lead.company}!`, 'success', lead.id);
+        report.push({ leadId: lead.id, status: 'Success' });
 
       } catch (leadError) {
-        resultsReport.push({
-          leadId: lead.id,
-          name: lead.name,
-          company: lead.company,
-          status: `Failed: ${leadError.message}`
-        });
+        sendLog(`❌ Error handling pipeline step for ${lead.company}: ${leadError.message}`, 'error', lead.id);
+        report.push({ leadId: lead.id, status: 'Failed' });
       }
     }
 
-    return res.status(200).json({
-      success: true,
-      message: 'Bulk automation completed for selected leads.',
-      report: resultsReport
-    });
+    // بث تقرير الإغلاق النهائي لإعلام الـ Frontend بانتهاء العملية بالكامل وثبات التقارير
+    const finalData = JSON.stringify({ done: true, report });
+    res.write(`data: ${finalData}\n\n`);
+    res.end();
 
   } catch (globalError) {
-    return res.status(500).json({
-      success: false,
-      error: `Global automation failure: ${globalError.message}`
-    });
+    sendLog(`🚨 Critical Global Pipeline Failure: ${globalError.message}`, 'error');
+    res.end();
   }
 };
+
+// 3. جلب قائمة العملاء
 const getLeads = async (req, res) => {
   try {
     res.status(200).json({ success: true, leads: mockLeads });
@@ -146,8 +163,16 @@ const getLeads = async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 };
+
+// الابقاء على الدالة القديمة لضمان عدم كسر أي مسارات برمجية مرتبطة
+const triggerBulkAutomation = async (req, res) => {
+  // تم تحويل الثقل إلى دالة الـ SSE البثية المباشرة
+  return triggerBulkAutomationSSE(req, res);
+};
+
 module.exports = {
   generateCampaignText,
   triggerBulkAutomation,
+  triggerBulkAutomationSSE,
   getLeads
 };

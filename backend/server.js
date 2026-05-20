@@ -9,8 +9,12 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 // Middleware
-app.use(cors());
-app.use(express.json());
+
+app.use(cors({
+  origin: 'http://localhost:5173', // مسار الـ Frontend الخاص بك
+  credentials: true,
+  exposedHeaders: ['Content-Type', 'Cache-Control', 'Connection'] 
+}));app.use(express.json());
 
 // ربط مسارات الحملات بالمسار الرئيسي /api/campaigns
 app.use('/api/campaigns', campaignRoutes);
