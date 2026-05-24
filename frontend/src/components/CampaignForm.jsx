@@ -1,54 +1,77 @@
 import React from 'react';
+import { LuTarget, LuMapPin, LuZap } from 'react-icons/lu';
 
-function CampaignForm({ formData, setFormData, onLaunch, selectedCount, loading }) {
-  const handleChange = (e) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
-  };
-
+const CampaignForm = ({ formData, setFormData, onFetchLeads, loading, isAutomating }) => {
   return (
-    <section className="bg-slate-800 p-6 rounded-xl border border-slate-700 h-fit space-y-4">
-      <h2 className="text-lg font-semibold text-slate-200">Campaign Global Configurations</h2>
-      
-      <div>
-        <label className="block text-sm font-medium mb-1 text-slate-400">Product Name</label>
-        <input
-          type="text"
-          name="productName"
-          value={formData.productName}
-          onChange={handleChange}
-          placeholder="e.g., Luxury Custom T-Shirts"
-          className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2 text-slate-200 focus:outline-none focus:border-blue-500"
-        />
-      </div>
+    <div className="bg-slate-900/40 border border-slate-800/80 backdrop-blur-md rounded-2xl p-6 mb-6 shadow-xl shadow-black/20">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
 
-      <div>
-        <label className="block text-sm font-medium mb-1 text-slate-400">Tone</label>
-        <select
-          name="tone"
-          value={formData.tone}
-          onChange={handleChange}
-          className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2 text-slate-200 focus:outline-none focus:border-blue-500"
-        >
-          <option value="Energetic">Energetic</option>
-          <option value="Professional">Professional</option>
-          <option value="Creative">Creative</option>
-        </select>
-      </div>
+        {/* Field: Niche */}
+        <div className="space-y-2">
+          <label className="block text-[11px] font-medium text-slate-400 uppercase tracking-widest">
+            Target Niche
+          </label>
+          <div className="relative">
+            <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500 text-sm">
+              <LuTarget size={14} />
+            </span>
+            <input
+              type="text"
+              value={formData.niche}
+              onChange={(e) => setFormData(prev => ({ ...prev, niche: e.target.value }))}
+              placeholder="e.g., Dental Clinic, Accountant"
+              className="w-full bg-slate-950/60 border border-slate-800 rounded-xl pl-10 pr-4 py-2.5 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/20 transition-all font-medium"
+            />
+          </div>
+        </div>
 
-      <button
-        type="button"
-        onClick={onLaunch}
-        disabled={loading}
-        className={`w-full font-medium py-2.5 px-4 rounded-lg transition duration-200 mt-2 ${
-          loading 
-            ? 'bg-slate-700 text-slate-400 cursor-not-allowed' 
-            : 'bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-900/20'
-        }`}
-      >
-        {loading ? 'Processing Contextual Queue...' : `Launch Campaign on (${selectedCount}) Leads ⚙️`}
-      </button>
-    </section>
+        {/* Field: Location */}
+        <div className="space-y-2">
+          <label className="block text-[11px] font-medium text-slate-400 uppercase tracking-widest">
+            Location / City
+          </label>
+          <div className="relative">
+            <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500 text-sm">
+              <LuMapPin size={14} />
+            </span>
+            <input
+              type="text"
+              value={formData.location}
+              onChange={(e) => setFormData(prev => ({ ...prev, location: e.target.value }))}
+              placeholder="e.g., Beni Mellal, Málaga"
+              className="w-full bg-slate-950/60 border border-slate-800 rounded-xl pl-10 pr-4 py-2.5 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/20 transition-all font-medium"
+            />
+          </div>
+        </div>
+
+        {/* Action Button */}
+        <div className="flex items-end">
+          <button
+            onClick={onFetchLeads}
+            disabled={loading || isAutomating}
+            className="w-full h-[46px] relative group overflow-hidden rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 font-semibold text-sm text-slate-950 transition-all duration-300 hover:opacity-95 active:scale-[0.98] disabled:opacity-20 disabled:scale-100 disabled:cursor-not-allowed shadow-lg shadow-emerald-500/10"
+          >
+            <span className="flex items-center justify-center gap-2">
+              {loading && !isAutomating ? (
+                <>
+                  <svg className="animate-spin h-4 w-4 text-slate-950" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                  </svg>
+                  Scraping Maps Engine...
+                </>
+              ) : (
+                <>
+                  <LuZap size={14} /> Discover Live Leads
+                </>
+              )}
+            </span>
+          </button>
+        </div>
+
+      </div>
+    </div>
   );
-}
+};
 
 export default CampaignForm;
